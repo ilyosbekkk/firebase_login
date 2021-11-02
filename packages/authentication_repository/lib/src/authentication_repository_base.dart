@@ -1,6 +1,8 @@
+import 'package:authentication_repository/src/models/user.dart';
 import 'package:cache/cache.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 
 class SignUpWithEmailAndPasswordFailure implements Exception {
   const SignUpWithEmailAndPasswordFailure([this.message = 'An unknown exception occured']);
@@ -124,4 +126,81 @@ class AuthenticationRepository {
   final CacheClient _cache;
   final FirebaseAuth _firebaseAuth;
   final GoogleSignIn _googleSignIn;
+
+  @visibleForTesting
+  bool isWeb = kIsWeb;
+
+  @visibleForTesting
+  static const userCacheKey = '__user_cache_key__';
+
+  Stream<AppUser> get user {
+    return _firebaseAuth.authStateChanges().map((firebaseUser) {
+      //advanced way of writing  below function:   final user = (firebaseUser == null) ? AppUser.empty : firebaseUser.toUser; {extension functions in dart}
+      final user = (firebaseUser == null) ? AppUser.empty : AppUser(id: firebaseUser.uid, email: firebaseUser.email, name: firebaseUser.displayName, photo: firebaseUser.photoURL);
+      //cache current user {userCacheKey and  user}
+      _cache.write(key: userCacheKey, value: user);
+      return user;
+    });
+  }
+
+  AppUser get currentUser {
+    return _cache.read<AppUser>(key: userCacheKey) ?? AppUser.empty;
+  }
+
+  //Create new user with provided email and password
+  Future<void> signUp({required String email, required String password}) async {
+    try {
+      await _firebaseAuth.createUserWithEmailAndPassword(email: email, password: password);
+    } on FirebaseAuthException catch (e) {
+      throw SignUpWithEmailAndPasswordFailure.fromCode(e.code);
+    } catch (_) {
+      throw const SignUpWithEmailAndPasswordFailure();
+    }
+  }
+
+  //SignIn with  Google Flow
+  Future<void> logInWithGoogle() async {
+    try {
+      late final AuthCredential credential;
+      if (isWeb) {
+        final googleProvider = GoogleAuthProvider();
+        final userCredential = await _firebaseAuth.signInWithPopup(googleProvider);
+        credential = userCredential.credential!;
+      } else {
+        final googleUser = await _googleSignIn.signIn();
+        final googleAuth = await googleUser!.authentication;
+        credential = GoogleAuthProvider.credential(accessToken: googleAuth.accessToken, idToken: googleAuth.idToken);
+        await _firebaseAuth.signInWithCredential(credential);
+      }
+    } on FirebaseAuthException catch (e) {
+      throw LogInWithGoogleFailure.fromCode(e.code);
+    } catch (_) {
+      throw const LogInWithGoogleFailure();
+    }
+  }
+
+  //SignIn  with provided  email  and  password
+  Future<void> loginWithEmailAndPassword({required String email, required String password}) async {
+    try {
+      await _firebaseAuth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+    } on FirebaseAuthException catch (e) {
+      throw LogInWithEmailAndPasswordFailure.fromCode(e.code);
+    } catch (_) {
+      throw const LogInWithEmailAndPasswordFailure();
+    }
+  }
+
+  //Signs out the current user which will emit User.empty  from user stream
+  Future<void> logOut() async {
+    try {
+      await Future.wait([_firebaseAuth.signOut(), _googleSignIn.signOut()]);
+    } catch (_) {}
+  }
+}
+
+extension on User {
+  AppUser get toUser => AppUser(id: uid, email: email, name: displayName, photo: photoURL);
 }
