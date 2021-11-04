@@ -14,7 +14,7 @@ class AppUser extends Equatable {
   bool get isEmpty => this == AppUser.empty;
 
   //get whether the current user is not empty
-  bool get isNoteEmpty => this != AppUser.empty;
+  bool get isNotEmpty => this != AppUser.empty;
 
   @override
   List<Object?> get props => [email, id, name, photo];
